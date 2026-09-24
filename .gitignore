@@ -1,0 +1,11 @@
+.env
+.tools/
+.cache/
+backend/.env
+backend/task-api
+mobile/.expo/
+mobile/node_modules/
+mobile/dist/
+mobile/coverage/
+*.log
+.DS_Store
