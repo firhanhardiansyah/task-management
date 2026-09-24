@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
+import { SymbolView } from 'expo-symbols';
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   KeyboardAvoidingView,
   Modal,
@@ -13,7 +15,15 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { createTask, listTasks, Task, TaskInput, TaskStatus, updateTask } from '@/api/tasks';
+import {
+  createTask,
+  deleteTask,
+  listTasks,
+  Task,
+  TaskInput,
+  TaskStatus,
+  updateTask,
+} from '@/api/tasks';
 
 const PAGE_SIZE = 10;
 const statuses: { label: string; value: '' | TaskStatus }[] = [
@@ -250,6 +260,14 @@ export function TaskListScreen() {
             setEditing(null);
             setRefreshVersion((value) => value + 1);
           }}
+          onDeleted={() => {
+            setEditing(null);
+            if (tasks.length === 1 && page > 1) {
+              setPage((value) => value - 1);
+            } else {
+              setRefreshVersion((value) => value + 1);
+            }
+          }}
         />
       ) : null}
     </SafeAreaView>
@@ -286,10 +304,12 @@ function TaskFormModal({
   task,
   onClose,
   onSaved,
+  onDeleted,
 }: {
   task?: Task;
   onClose: () => void;
   onSaved: () => void;
+  onDeleted?: () => void;
 }) {
   const [form, setForm] = useState<TaskInput>({
     title: task?.title ?? '',
@@ -298,8 +318,10 @@ function TaskFormModal({
     assignee: task?.assignee ?? '',
   });
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState('');
   const isEditing = task !== undefined;
+  const busy = saving || deleting;
 
   const save = async () => {
     if (!form.title.trim()) {
@@ -328,12 +350,64 @@ function TaskFormModal({
     }
   };
 
+  const remove = async () => {
+    if (!task || !onDeleted) return;
+    setDeleting(true);
+    setError('');
+    try {
+      await deleteTask(task.id);
+      onDeleted();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Unable to delete task');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const confirmDelete = () => {
+    if (!task) return;
+    Alert.alert(
+      'Delete task?',
+      `“${task.title}” will be removed from your task list.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Delete', style: 'destructive', onPress: () => void remove() },
+      ],
+    );
+  };
+
   return (
     <Modal animationType="slide" onRequestClose={onClose} transparent visible>
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalBackdrop}>
         <View style={styles.modalCard}>
           <View style={styles.sheetHandle} />
-          <Text style={styles.modalTitle}>{isEditing ? 'Edit task' : 'Add task'}</Text>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>{isEditing ? 'Edit task' : 'Add task'}</Text>
+            {isEditing ? (
+              <Pressable
+                accessibilityLabel="Delete task"
+                accessibilityRole="button"
+                disabled={busy}
+                hitSlop={8}
+                onPress={confirmDelete}
+                style={({ pressed }) => [
+                  styles.deleteIconButton,
+                  pressed && styles.deleteIconButtonPressed,
+                  busy && styles.buttonDisabled,
+                ]}>
+                {deleting ? (
+                  <ActivityIndicator color={material.error} size="small" />
+                ) : (
+                  <SymbolView
+                    fallback={<Text style={styles.deleteIconFallback}>×</Text>}
+                    name={{ ios: 'trash', android: 'delete', web: 'delete' }}
+                    size={22}
+                    tintColor={material.error}
+                  />
+                )}
+              </Pressable>
+            ) : null}
+          </View>
           <Text style={styles.fieldLabel}>Title</Text>
           <TextInput accessibilityLabel="Task title" onChangeText={(title) => setForm((value) => ({ ...value, title }))} placeholder="What needs to be done?" placeholderTextColor={material.onSurfaceVariant} style={styles.input} value={form.title} />
           <Text style={styles.fieldLabel}>Description</Text>
@@ -367,8 +441,8 @@ function TaskFormModal({
           </View>
           {error ? <Text style={styles.errorText}>{error}</Text> : null}
           <View style={styles.modalActions}>
-            <Pressable disabled={saving} onPress={onClose} style={styles.cancelButton}><Text style={styles.cancelText}>Cancel</Text></Pressable>
-            <Pressable accessibilityLabel="Save task" disabled={saving} onPress={save} style={[styles.saveButton, saving && styles.buttonDisabled]}>
+            <Pressable disabled={busy} onPress={onClose} style={styles.cancelButton}><Text style={styles.cancelText}>Cancel</Text></Pressable>
+            <Pressable accessibilityLabel="Save task" disabled={busy} onPress={save} style={[styles.saveButton, busy && styles.buttonDisabled]}>
               {saving ? <ActivityIndicator color={material.onPrimary} /> : <Text style={styles.saveText}>{isEditing ? 'Save changes' : 'Create task'}</Text>}
             </Pressable>
           </View>
@@ -459,7 +533,11 @@ const styles = StyleSheet.create({
   modalBackdrop: { backgroundColor: 'rgba(29, 27, 32, 0.42)', flex: 1, justifyContent: 'flex-end' },
   modalCard: { backgroundColor: material.surface, borderTopLeftRadius: 28, borderTopRightRadius: 28, gap: 8, paddingBottom: 28, paddingHorizontal: 24, paddingTop: 10 },
   sheetHandle: { alignSelf: 'center', backgroundColor: material.outlineVariant, borderRadius: 2, height: 4, marginBottom: 12, width: 32 },
-  modalTitle: { color: material.onSurface, fontSize: 24, fontWeight: '500', marginBottom: 12 },
+  modalHeader: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 },
+  modalTitle: { color: material.onSurface, fontSize: 24, fontWeight: '500' },
+  deleteIconButton: { alignItems: 'center', backgroundColor: material.errorContainer, borderRadius: 20, height: 40, justifyContent: 'center', width: 40 },
+  deleteIconButtonPressed: { opacity: 0.8 },
+  deleteIconFallback: { color: material.error, fontSize: 24, lineHeight: 26 },
   fieldLabel: { color: material.onSurfaceVariant, fontSize: 12, fontWeight: '600', marginLeft: 4, marginTop: 4 },
   input: { backgroundColor: material.surface, borderColor: material.outline, borderRadius: 4, borderWidth: 1, color: material.onSurface, fontSize: 16, minHeight: 52, paddingHorizontal: 16, paddingVertical: 12 },
   textArea: { minHeight: 88, textAlignVertical: 'top' },

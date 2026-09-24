@@ -57,3 +57,7 @@ export function createTask(input: TaskInput) {
 export function updateTask(id: number, input: TaskInput) {
   return request<Task>(`/api/tasks/${id}`, { method: 'PUT', body: JSON.stringify(input) });
 }
+
+export function deleteTask(id: number) {
+  return request<void>(`/api/tasks/${id}`, { method: 'DELETE' });
+}
